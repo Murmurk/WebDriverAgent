@@ -7,15 +7,16 @@ on:
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Select Xcode
         run: |
-          # List available Xcodes, pick latest
           ls /Applications/ | grep Xcode
-          sudo xcode-select -s /Applications/Xcode_16.1.app || sudo xcode-select -s /Applications/Xcode_15.4.app || sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | tail -1)"
+          XCODE=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+          echo "Using: $XCODE"
+          sudo xcode-select -s "$XCODE"
           xcodebuild -version
 
       - name: Copy media commands
