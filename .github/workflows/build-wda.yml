@@ -1,0 +1,71 @@
+name: Build WDA + Media Endpoints
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          # List available Xcodes, pick latest
+          ls /Applications/ | grep Xcode
+          sudo xcode-select -s /Applications/Xcode_16.1.app || sudo xcode-select -s /Applications/Xcode_15.4.app || sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | tail -1)"
+          xcodebuild -version
+
+      - name: Copy media commands
+        run: |
+          cp wda_patch/FBMediaCommands.h WebDriverAgentLib/Commands/
+          cp wda_patch/FBMediaCommands.m WebDriverAgentLib/Commands/
+
+      - name: Patch Xcode project
+        run: |
+          gem install xcodeproj
+          ruby wda_patch/patch_project.rb WebDriverAgent.xcodeproj
+
+      - name: Patch Info.plist
+        run: |
+          PLIST="WebDriverAgentRunner/Info.plist"
+          /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryUsageDescription string 'WDA needs Photos access to save and manage media'" "$PLIST" 2>/dev/null || \
+          /usr/libexec/PlistBuddy -c "Set :NSPhotoLibraryUsageDescription 'WDA needs Photos access to save and manage media'" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryAddUsageDescription string 'WDA needs Photos access to save media'" "$PLIST" 2>/dev/null || \
+          /usr/libexec/PlistBuddy -c "Set :NSPhotoLibraryAddUsageDescription 'WDA needs Photos access to save media'" "$PLIST"
+          echo "Plist patched:"
+          /usr/libexec/PlistBuddy -c "Print :NSPhotoLibraryUsageDescription" "$PLIST"
+
+      - name: Build for testing
+        run: |
+          xcodebuild build-for-testing \
+            -project WebDriverAgent.xcodeproj \
+            -scheme WebDriverAgentRunner \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath ./build \
+            CODE_SIGNING_ALLOWED=NO \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=NO \
+            GCC_TREAT_WARNINGS_AS_ERRORS=NO
+
+      - name: Package xctrunner
+        run: |
+          cd build/Build/Products/Debug-iphoneos
+          ls -la
+          RUNNER_DIR=$(ls -d *.xctrunner 2>/dev/null | head -1)
+          if [ -z "$RUNNER_DIR" ]; then
+            echo "No .xctrunner found, looking for .app"
+            ls -la
+            RUNNER_DIR=$(ls -d *Runner*.app 2>/dev/null | head -1)
+          fi
+          echo "Packaging: $RUNNER_DIR"
+          zip -r ../../../../WebDriverAgent-Media.zip "$RUNNER_DIR"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WebDriverAgent-Media
+          path: WebDriverAgent-Media.zip
+          retention-days: 90
